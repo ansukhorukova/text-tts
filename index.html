@@ -114,7 +114,11 @@ function splitText(text) {
 
 function gttsUrl(text, lang) {
   const base = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang}&client=tw-ob`;
-  return `https://corsproxy.io/?${encodeURIComponent(base)}`;
+  return `https://api.allorigins.win/raw?url=${encodeURIComponent(base)}`;
+}
+
+function gttsUrlDirect(text, lang) {
+  return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang}&client=tw-ob`;
 }
 
 function speak() {
@@ -134,19 +138,20 @@ function playAt(chunks, i, sid) {
   prog.value = Math.round((i / chunks.length) * 100);
   setStatus(`Частина ${i + 1} / ${chunks.length}`, true);
 
-  audio = new Audio(gttsUrl(chunks[i], langSel.value));
-  audio.playbackRate = parseFloat(speedIn.value);
-  audio.onended = () => { if (sid === sessionId) playAt(chunks, i + 1, sid); };
-  audio.onerror = () => {
-    if (sid !== sessionId) return;
-    setStatus('Помилка. Перевір інтернет.');
-    done();
+  const tryPlay = (url, fallback) => {
+    audio = new Audio(url);
+    audio.playbackRate = parseFloat(speedIn.value);
+    audio.onended = () => { if (sid === sessionId) playAt(chunks, i + 1, sid); };
+    audio.onerror = () => {
+      if (sid !== sessionId) return;
+      if (fallback) { tryPlay(fallback, null); return; }
+      setStatus('Помилка. Перевір інтернет.');
+      done();
+    };
+    audio.play().catch(() => { if (sid !== sessionId) return; setStatus('Натисни ▶ ще раз'); done(); });
   };
-  audio.play().catch(() => {
-    if (sid !== sessionId) return;
-    setStatus('Натисни ▶ ще раз');
-    done();
-  });
+  tryPlay(gttsUrl(chunks[i], langSel.value), gttsUrlDirect(chunks[i], langSel.value));
+
 }
 
 function stop() {
