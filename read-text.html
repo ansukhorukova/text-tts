@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Читання тексту для дитини</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #f3f4f6;
+      padding: 16px;
+    }
+
+    .container {
+      width: min(760px, 100%);
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    h1 { margin: 0 0 10px; font-size: 1.4rem; }
+
+    textarea {
+      width: 100%;
+      min-height: 220px;
+      padding: 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 1.05rem;
+      line-height: 1.5;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+
+    .controls {
+      margin-top: 12px;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 10px;
+      align-items: end;
+    }
+
+    label { font-size: 0.9rem; color: #374151; display: block; margin-bottom: 4px; }
+
+    select, input[type='range'] {
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      background: #fff;
+      box-sizing: border-box;
+    }
+
+    .buttons { margin-top: 12px; display: flex; gap: 10px; flex-wrap: wrap; }
+
+    button {
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+
+    #speakBtn { background: #2563eb; color: #fff; }
+    #pauseBtn { background: #f59e0b; color: #111827; }
+    #stopBtn { background: #ef4444; color: #fff; }
+
+    .hint { margin-top: 10px; color: #6b7280; font-size: 0.92rem; }
+    .status { margin-top: 8px; font-size: 0.92rem; color: #1f2937; }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>📖 Зрозуміле читання тексту</h1>
+    <textarea id="textInput" placeholder="Вставте текст з підручника..."></textarea>
+
+    <div class="controls">
+      <div>
+        <label for="voiceSelect">Голос</label>
+        <select id="voiceSelect"></select>
+      </div>
+      <div>
+        <label for="rateRange">Швидкість: <span id="rateValue">0.9x</span></label>
+        <input id="rateRange" type="range" min="0.7" max="1.1" step="0.05" value="0.9" />
+      </div>
+      <div>
+        <label for="pitchRange">Тон: <span id="pitchValue">1.0</span></label>
+        <input id="pitchRange" type="range" min="0.8" max="1.2" step="0.05" value="1" />
+      </div>
+    </div>
+
+    <div class="buttons">
+      <button id="speakBtn">Читати</button>
+      <button id="pauseBtn">Пауза / Продовжити</button>
+      <button id="stopBtn">Зупинити</button>
+    </div>
+
+    <p class="status" id="status">Готово до читання.</p>
+    <p class="hint">Порада: для дитини зазвичай краще швидкість 0.8–0.95x та голос українською.</p>
+  </main>
+
+  <script>
+    const textInput = document.getElementById('textInput');
+    const voiceSelect = document.getElementById('voiceSelect');
+    const rateRange = document.getElementById('rateRange');
+    const pitchRange = document.getElementById('pitchRange');
+    const rateValue = document.getElementById('rateValue');
+    const pitchValue = document.getElementById('pitchValue');
+    const statusEl = document.getElementById('status');
+
+    const speakBtn = document.getElementById('speakBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const stopBtn = document.getElementById('stopBtn');
+
+    let voices = [];
+    let isStopped = false;
+
+    function setStatus(message) {
+      statusEl.textContent = message;
+    }
+
+    function splitIntoChunks(text, maxLength = 220) {
+      const sentences = text.match(/[^.!?…\n]+[.!?…\n]*/g) || [text];
+      const chunks = [];
+      let buffer = '';
+
+      for (const sentence of sentences) {
+        if ((buffer + sentence).length > maxLength) {
+          if (buffer.trim()) chunks.push(buffer.trim());
+          buffer = sentence;
+        } else {
+          buffer += sentence;
+        }
+      }
+
+      if (buffer.trim()) chunks.push(buffer.trim());
+      return chunks;
+    }
+
+    function fillVoices() {
+      voices = window.speechSynthesis.getVoices();
+      voiceSelect.innerHTML = '';
+
+      const preferred = voices
+        .filter(v => v.lang.toLowerCase().startsWith('uk') || v.lang.toLowerCase().startsWith('en'))
+        .sort((a, b) => a.lang.localeCompare(b.lang));
+
+      const list = preferred.length ? preferred : voices;
+      list.forEach((voice, index) => {
+        const option = document.createElement('option');
+        option.value = voice.name;
+        option.textContent = `${voice.name} (${voice.lang})`;
+        if (voice.default) option.textContent += ' • default';
+        voiceSelect.appendChild(option);
+
+        if (index === 0 && voice.lang.toLowerCase().startsWith('uk')) {
+          voiceSelect.value = voice.name;
+        }
+      });
+    }
+
+    async function readText() {
+      const text = textInput.value.trim();
+      if (!text) {
+        alert('Будь ласка, додайте текст.');
+        return;
+      }
+
+      window.speechSynthesis.cancel();
+      isStopped = false;
+
+      const chunks = splitIntoChunks(text);
+      const selectedVoice = voices.find(v => v.name === voiceSelect.value);
+      const rate = parseFloat(rateRange.value);
+      const pitch = parseFloat(pitchRange.value);
+
+      setStatus(`Читаю: 0/${chunks.length}`);
+
+      for (let i = 0; i < chunks.length; i++) {
+        if (isStopped) break;
+
+        await new Promise((resolve, reject) => {
+          const utterance = new SpeechSynthesisUtterance(chunks[i]);
+          if (selectedVoice) utterance.voice = selectedVoice;
+          utterance.rate = rate;
+          utterance.pitch = pitch;
+
+          utterance.onend = resolve;
+          utterance.onerror = reject;
+
+          setStatus(`Читаю: ${i + 1}/${chunks.length}`);
+          window.speechSynthesis.speak(utterance);
+        }).catch(() => setStatus('Сталася помилка під час озвучення.'));
+      }
+
+      if (!isStopped) {
+        setStatus('Готово ✓');
+      }
+    }
+
+    function togglePause() {
+      if (!window.speechSynthesis.speaking) return;
+      if (window.speechSynthesis.paused) {
+        window.speechSynthesis.resume();
+        setStatus('Продовжено читання.');
+      } else {
+        window.speechSynthesis.pause();
+        setStatus('Пауза.');
+      }
+    }
+
+    function stopReading() {
+      isStopped = true;
+      window.speechSynthesis.cancel();
+      setStatus('Зупинено.');
+    }
+
+    rateRange.addEventListener('input', () => {
+      rateValue.textContent = `${rateRange.value}x`;
+    });
+
+    pitchRange.addEventListener('input', () => {
+      pitchValue.textContent = Number(pitchRange.value).toFixed(2);
+    });
+
+    speakBtn.addEventListener('click', readText);
+    pauseBtn.addEventListener('click', togglePause);
+    stopBtn.addEventListener('click', stopReading);
+
+    fillVoices();
+    window.speechSynthesis.onvoiceschanged = fillVoices;
+  </script>
+</body>
+</html>
