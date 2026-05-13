@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Озвучення тексту</title>
+<script src="https://js.puter.com/v2/"></script>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
@@ -51,8 +52,9 @@
   button:hover { opacity: .85; }
   button:disabled { opacity: .35; cursor: not-allowed; }
   progress { width: 100%; height: 6px; border-radius: 4px; accent-color: #7c3aed; }
-  .status { font-size: 0.8rem; color: #666; text-align: center; min-height: 18px; }
+  .status { font-size: 0.82rem; color: #666; text-align: center; min-height: 18px; }
   .status.active { color: #a78bfa; }
+  .status.error { color: #e74c3c; }
 </style>
 </head>
 <body>
@@ -61,13 +63,14 @@
   <textarea id="txt" placeholder="Вставте або введіть текст тут…"></textarea>
   <div class="row">
     <div class="sel-wrap">
-      <label>Мова</label>
-      <select id="lang">
-        <option value="uk">🇺🇦 Українська</option>
-        <option value="en">🇬🇧 English</option>
-        <option value="de">🇩🇪 Deutsch</option>
-        <option value="fr">🇫🇷 Français</option>
-        <option value="pl">🇵🇱 Polski</option>
+      <label>Голос</label>
+      <select id="voice">
+        <option value="nova">Nova (жіночий, м'який)</option>
+        <option value="alloy">Alloy (нейтральний)</option>
+        <option value="echo">Echo (чоловічий)</option>
+        <option value="fable">Fable (виразний)</option>
+        <option value="onyx">Onyx (глибокий)</option>
+        <option value="shimmer">Shimmer (жіночий, чіткий)</option>
       </select>
     </div>
     <div class="range-wrap">
@@ -85,7 +88,7 @@
 
 <script>
 const txt      = document.getElementById('txt');
-const langSel  = document.getElementById('lang');
+const voiceSel = document.getElementById('voice');
 const speedIn  = document.getElementById('speed');
 const speedVal = document.getElementById('speedVal');
 const btnPlay  = document.getElementById('btnPlay');
@@ -95,85 +98,95 @@ const status   = document.getElementById('status');
 
 speedIn.oninput = () => speedVal.textContent = speedIn.value;
 
-let sessionId = 0, audio = null;
+let currentAudio = null;
+let stopped = false;
 
 txt.addEventListener('paste', () => setTimeout(() => { if (txt.value.trim()) speak(); }, 80));
 btnPlay.onclick = speak;
 btnStop.onclick = stop;
 
+// Split into ~500 char chunks at sentence boundaries
 function splitText(text) {
   const parts = text.match(/[^.!?…\n]+[.!?\n…]?/g) || [text];
   const res = []; let buf = '';
   for (const p of parts) {
-    if ((buf + p).length > 190) { if (buf.trim()) res.push(buf.trim()); buf = p; }
+    if ((buf + p).length > 500) { if (buf.trim()) res.push(buf.trim()); buf = p; }
     else buf += p;
   }
   if (buf.trim()) res.push(buf.trim());
   return res;
 }
 
-function gttsUrl(text, lang) {
-  const base = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang}&client=tw-ob`;
-  return `https://api.allorigins.win/raw?url=${encodeURIComponent(base)}`;
-}
-
-function gttsUrlDirect(text, lang) {
-  return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang}&client=tw-ob`;
-}
-
-function speak() {
+async function speak() {
   stop();
   const text = txt.value.trim();
   if (!text) { setStatus('Введіть текст!'); return; }
+
+  stopped = false;
+  btnPlay.disabled = true;
+  btnStop.disabled = false;
+  setStatus('Генерую аудіо…', 'active');
+
   const chunks = splitText(text);
-  const sid = ++sessionId;
-  btnPlay.disabled = true; btnStop.disabled = false;
-  playAt(chunks, 0, sid);
-}
 
-function playAt(chunks, i, sid) {
-  if (sid !== sessionId) return;
-  if (i >= chunks.length) { done(); return; }
+  for (let i = 0; i < chunks.length; i++) {
+    if (stopped) break;
 
-  prog.value = Math.round((i / chunks.length) * 100);
-  setStatus(`Частина ${i + 1} / ${chunks.length}`, true);
+    prog.value = Math.round((i / chunks.length) * 100);
+    setStatus(`Частина ${i + 1} / ${chunks.length}…`, 'active');
 
-  const tryPlay = (url, fallback) => {
-    audio = new Audio(url);
-    audio.playbackRate = parseFloat(speedIn.value);
-    audio.onended = () => { if (sid === sessionId) playAt(chunks, i + 1, sid); };
-    audio.onerror = () => {
-      if (sid !== sessionId) return;
-      if (fallback) { tryPlay(fallback, null); return; }
-      setStatus('Помилка. Перевір інтернет.');
-      done();
-    };
-    audio.play().catch(() => { if (sid !== sessionId) return; setStatus('Натисни ▶ ще раз'); done(); });
-  };
-  tryPlay(gttsUrl(chunks[i], langSel.value), gttsUrlDirect(chunks[i], langSel.value));
+    try {
+      const audio = await puter.ai.txt2speech(chunks[i], {
+        provider: 'openai',
+        voice: voiceSel.value,
+        speed: parseFloat(speedIn.value)
+      });
 
+      if (stopped) break;
+
+      currentAudio = audio;
+      audio.playbackRate = parseFloat(speedIn.value);
+
+      await new Promise((resolve, reject) => {
+        audio.onended = resolve;
+        audio.onerror = reject;
+        audio.play().catch(reject);
+      });
+
+    } catch (e) {
+      if (stopped) break;
+      setStatus('Помилка: ' + (e.message || e), 'error');
+      break;
+    }
+  }
+
+  if (!stopped) done();
 }
 
 function stop() {
-  sessionId++;
-  if (audio) {
-    audio.onended = null; audio.onerror = null;
-    audio.pause(); audio.src = ''; audio = null;
+  stopped = true;
+  if (currentAudio) {
+    currentAudio.pause();
+    currentAudio.src = '';
+    currentAudio = null;
   }
   prog.value = 0;
-  btnPlay.disabled = false; btnStop.disabled = true;
+  btnPlay.disabled = false;
+  btnStop.disabled = true;
   setStatus('Готовий до роботи');
 }
 
 function done() {
-  audio = null; prog.value = 100;
-  btnPlay.disabled = false; btnStop.disabled = true;
+  currentAudio = null;
+  prog.value = 100;
+  btnPlay.disabled = false;
+  btnStop.disabled = true;
   setStatus('Готово ✓');
 }
 
-function setStatus(msg, active) {
+function setStatus(msg, type) {
   status.textContent = msg;
-  status.className = 'status' + (active ? ' active' : '');
+  status.className = 'status' + (type ? ' ' + type : '');
 }
 </script>
 </body>
