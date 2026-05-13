@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Озвучення тексту</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', sans-serif;
+    background: #0f0f13; color: #e8e8f0;
+    min-height: 100vh;
+    display: flex; align-items: center; justify-content: center;
+    padding: 24px;
+  }
+  .card {
+    background: #1a1a24; border: 1px solid #2e2e42;
+    border-radius: 16px; padding: 28px;
+    width: 100%; max-width: 640px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  h1 { font-size: 1.2rem; color: #a78bfa; font-weight: 600; }
+  textarea {
+    width: 100%; min-height: 180px;
+    background: #12121a; border: 1px solid #2e2e42;
+    border-radius: 10px; color: #e8e8f0;
+    font-size: 1rem; padding: 14px; resize: vertical;
+    outline: none; transition: border-color .2s; line-height: 1.6;
+  }
+  textarea:focus { border-color: #7c3aed; }
+  textarea::placeholder { color: #555570; }
+  .row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+  .sel-wrap { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 140px; }
+  label { font-size: 0.75rem; color: #888; }
+  select {
+    background: #12121a; border: 1px solid #2e2e42;
+    border-radius: 8px; color: #e8e8f0;
+    padding: 8px 10px; font-size: 0.9rem; outline: none; cursor: pointer;
+  }
+  .range-wrap { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 120px; }
+  input[type=range] { accent-color: #7c3aed; width: 100%; cursor: pointer; }
+  .buttons { display: flex; gap: 10px; }
+  button {
+    flex: 1; padding: 14px; border: none; border-radius: 10px;
+    font-size: 1rem; font-weight: 600; cursor: pointer;
+    transition: opacity .15s, transform .1s;
+  }
+  button:active { transform: scale(.97); }
+  #btnPlay { background: #7c3aed; color: #fff; }
+  #btnStop { background: #c0392b; color: #fff; }
+  #btnPlay:hover { opacity: .85; }
+  #btnStop:hover { opacity: .85; }
+  button:disabled { opacity: .35; cursor: not-allowed; }
+  .progress-wrap { display: flex; flex-direction: column; gap: 6px; }
+  progress { width: 100%; height: 6px; border-radius: 4px; accent-color: #7c3aed; }
+  .status { font-size: 0.8rem; color: #666; text-align: center; min-height: 18px; }
+  .status.active { color: #a78bfa; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>🔊 Озвучення тексту</h1>
+  <textarea id="txt" placeholder="Вставте або введіть текст тут…"></textarea>
+  <div class="row">
+    <div class="sel-wrap">
+      <label>Мова</label>
+      <select id="lang">
+        <option value="uk">🇺🇦 Українська</option>
+        <option value="en">🇬🇧 English</option>
+        <option value="de">🇩🇪 Deutsch</option>
+        <option value="fr">🇫🇷 Français</option>
+        <option value="pl">🇵🇱 Polski</option>
+      </select>
+    </div>
+    <div class="range-wrap">
+      <label>Швидкість: <span id="speedVal">1</span>x</label>
+      <input type="range" id="speed" min="0.5" max="1.5" step="0.1" value="1">
+    </div>
+  </div>
+  <div class="buttons">
+    <button id="btnPlay">▶ Читати</button>
+    <button id="btnStop" disabled>■ Стоп</button>
+  </div>
+  <div class="progress-wrap">
+    <progress id="prog" value="0" max="100"></progress>
+    <div class="status" id="status">Готовий до роботи</div>
+  </div>
+</div>
+
+<script>
+const txt      = document.getElementById('txt');
+const langSel  = document.getElementById('lang');
+const speedIn  = document.getElementById('speed');
+const speedVal = document.getElementById('speedVal');
+const btnPlay  = document.getElementById('btnPlay');
+const btnStop  = document.getElementById('btnStop');
+const prog     = document.getElementById('prog');
+const status   = document.getElementById('status');
+
+speedIn.oninput = () => speedVal.textContent = speedIn.value;
+
+// --- State ---
+let sessionId = 0; // increments on every new play; used to cancel stale callbacks
+let audio = null;
+
+txt.addEventListener('paste', () => setTimeout(() => { if (txt.value.trim()) speak(); }, 80));
+btnPlay.onclick = speak;
+btnStop.onclick = stop;
+
+function splitText(text) {
+  const parts = text.match(/[^.!?…\n]+[.!?\n…]?/g) || [text];
+  const result = [];
+  let buf = '';
+  for (const p of parts) {
+    if ((buf + p).length > 190) {
+      if (buf.trim()) result.push(buf.trim());
+      buf = p;
+    } else { buf += p; }
+  }
+  if (buf.trim()) result.push(buf.trim());
+  return result;
+}
+
+function gttsUrl(text, lang) {
+  return `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodeURIComponent(text)}&tl=${lang}&client=tw-ob`;
+}
+
+function speak() {
+  stop();
+  const text = txt.value.trim();
+  if (!text) { setStatus('Введіть текст!'); return; }
+
+  const chunks = splitText(text);
+  const sid = ++sessionId;
+
+  btnPlay.disabled = true;
+  btnStop.disabled = false;
+
+  function playAt(i) {
+    if (sid !== sessionId) return; // session was stopped
+    if (i >= chunks.length) { if (sid === sessionId) done(); return; }
+
+    prog.value = Math.round((i / chunks.length) * 100);
+    setStatus(`Частина ${i + 1} / ${chunks.length}`, true);
+
+    audio = new Audio(gttsUrl(chunks[i], langSel.value));
+    audio.playbackRate = parseFloat(speedIn.value);
+
+    audio.onended = () => { if (sid === sessionId) playAt(i + 1); };
+    audio.onerror = () => {
+      if (sid !== sessionId) return;
+      setStatus('Помилка. Перевір підключення до інтернету.');
+      done();
+    };
+    audio.play().catch(() => {
+      if (sid !== sessionId) return;
+      setStatus('Натисни ▶ ще раз — браузер потребує взаємодії');
+      done();
+    });
+  }
+
+  playAt(0);
+}
+
+function stop() {
+  sessionId++; // invalidate any running session
+  if (audio) {
+    audio.onended = null;
+    audio.onerror = null;
+    audio.pause();
+    audio.src = '';
+    audio = null;
+  }
+  prog.value = 0;
+  btnPlay.disabled = false;
+  btnStop.disabled = true;
+  setStatus('Готовий до роботи');
+}
+
+function done() {
+  audio = null;
+  prog.value = 100;
+  btnPlay.disabled = false;
+  btnStop.disabled = true;
+  setStatus('Готово ✓');
+}
+
+function setStatus(msg, active) {
+  status.textContent = msg;
+  status.className = 'status' + (active ? ' active' : '');
+}
+</script>
+</body>
+</html>
