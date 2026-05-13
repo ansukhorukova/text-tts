@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Text Reader App</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: #f3f4f6;
+    }
+
+    .container {
+      width: min(700px, 92vw);
+      background: #ffffff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 1.4rem;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 180px;
+      padding: 12px;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      font-size: 1rem;
+      resize: vertical;
+      box-sizing: border-box;
+    }
+
+    .controls {
+      margin-top: 12px;
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: none;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+
+    #speakBtn {
+      background: #2563eb;
+      color: #fff;
+    }
+
+    #stopBtn {
+      background: #ef4444;
+      color: #fff;
+    }
+
+    .hint {
+      margin-top: 10px;
+      color: #6b7280;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <h1>Text to Speech Reader</h1>
+    <textarea id="textInput" placeholder="Type or paste text here..."></textarea>
+
+    <div class="controls">
+      <button id="speakBtn">Read Text</button>
+      <button id="stopBtn">Stop</button>
+    </div>
+
+    <p class="hint">This app uses your browser's built-in SpeechSynthesis API.</p>
+  </main>
+
+  <script>
+    const textInput = document.getElementById('textInput');
+    const speakBtn = document.getElementById('speakBtn');
+    const stopBtn = document.getElementById('stopBtn');
+
+    function readText() {
+      const text = textInput.value.trim();
+      if (!text) {
+        alert('Please add some text first.');
+        return;
+      }
+
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1;
+      utterance.pitch = 1;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    speakBtn.addEventListener('click', readText);
+    stopBtn.addEventListener('click', () => window.speechSynthesis.cancel());
+  </script>
+</body>
+</html>
