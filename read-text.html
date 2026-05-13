@@ -179,7 +179,7 @@
       const rate = parseFloat(rateRange.value);
       const pitch = parseFloat(pitchRange.value);
 
-      setStatus(`Читаю: 0/${chunks.length}`);
+      setStatus(`Підготовка: 0/${chunks.length}`);
 
       for (let i = 0; i < chunks.length; i++) {
         if (isStopped) break;
@@ -233,7 +233,9 @@
     stopBtn.addEventListener('click', stopReading);
 
     fillVoices();
-    window.speechSynthesis.onvoiceschanged = fillVoices;
+    if ('onvoiceschanged' in window.speechSynthesis) {
+      window.speechSynthesis.onvoiceschanged = fillVoices;
+    }
   </script>
 </body>
 </html>
